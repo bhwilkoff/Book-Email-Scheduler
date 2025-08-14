@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Email Scheduler</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #77BEF0 0%, #FFCB61 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #FF894F 0%, #EA5B6F 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .step {
+            padding: 30px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .step:last-child {
+            border-bottom: none;
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .step-number {
+            width: 40px;
+            height: 40px;
+            background: #FF894F;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+
+        .step-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .upload-area {
+            border: 3px dashed #d1d5db;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #fafafa;
+        }
+
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #FF894F;
+            background: #fff4f0;
+        }
+
+        .upload-area.has-file {
+            border-color: #77BEF0;
+            background: #f0f8ff;
+        }
+
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: #6b7280;
+        }
+
+        .upload-text {
+            font-size: 1.1rem;
+            color: #4b5563;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            font-size: 0.9rem;
+            color: #9ca3af;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+
+        label {
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 8px;
+        }
+
+        input, select, textarea {
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #FF894F;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #FF894F 0%, #EA5B6F 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .progress-container {
+            margin: 20px 0;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #77BEF0, #FF894F);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            text-align: center;
+            margin-top: 10px;
+            color: #6b7280;
+        }
+
+        .result-area {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 10px;
+        }
+
+        .preview-section {
+            margin-bottom: 20px;
+        }
+
+        .preview-section h4 {
+            color: #374151;
+            margin-bottom: 10px;
+        }
+
+        .chunk-preview {
+            max-height: 200px;
+            overflow-y: auto;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .setup-instructions {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .setup-instructions h3 {
+            color: #92400e;
+            margin-bottom: 15px;
+        }
+
+        .setup-steps {
+            color: #92400e;
+            line-height: 1.6;
+        }
+
+        .url-highlight {
+            background: #FFCB61;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+
+        .code-block {
+            background: #1f2937;
+            color: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            margin: 15px 0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .copy-btn {
+            background: #77BEF0;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📚 Book Email Scheduler</h1>
+            <p>Transform any book into a personalized email reading series</p>
+        </div>
+
+        <!-- Step 1: File Upload -->
+        <div class="step">
+            <div class="step-header">
+                <div class="step-number">1</div>
+                <div class="step-title">Upload Your Book</div>
+            </div>
+            
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📄</div>
+                <div class="upload-text">Click to choose a file or drag and drop</div>
+                <div class="upload-hint">Supports PDF, ePub, and TXT files (max 50MB)</div>
+                <input type="file" id="fileInput" class="file-input" accept=".pdf,.epub,.txt">
+            </div>
+            
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">Processing file...</div>
+            </div>
+        </div>
+
+        <!-- Step 2: Configuration -->
+        <div class="step">
+            <div class="step-header">
+                <div class="step-number">2</div>
+                <div class="step-title">Configure Email Schedule</div>
+            </div>
+            
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="emailAddress">Email Address</label>
+                    <input type="email" id="emailAddress" placeholder="your@email.com" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="frequency">Email Frequency</label>
+                    <select id="frequency">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="morning-night">Morning & Night</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="timezone">Timezone</label>
+                    <select id="timezone">
+                        <option value="America/New_York">Eastern Time (US)</option>
+                        <option value="America/Chicago">Central Time (US)</option>
+                        <option value="America/Denver">Mountain Time (US)</option>
+                        <option value="America/Los_Angeles">Pacific Time (US)</option>
+                        <option value="Europe/London">London</option>
+                        <option value="Europe/Paris">Paris</option>
+                        <option value="Asia/Tokyo">Tokyo</option>
+                        <option value="Australia/Sydney">Sydney</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="chunkCount">Number of Email Parts</label>
+                    <input type="number" id="chunkCount" min="1" max="100" value="10">
+                </div>
+                
+                <div class="form-group">
+                    <label for="startDate">Start Date</label>
+                    <input type="date" id="startDate">
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Generate & Setup -->
+        <div class="step">
+            <div class="step-header">
+                <div class="step-number">3</div>
+                <div class="step-title">Process & Generate Script</div>
+            </div>
+            
+            <button class="btn" id="processBtn" onclick="processFile()">
+                🔧 Process Book & Generate Email Script
+            </button>
+            
+            <div class="result-area" id="resultArea">
+                <div class="preview-section">
+                    <h4>Preview of First Email:</h4>
+                    <div class="chunk-preview" id="chunkPreview"></div>
+                </div>
+                
+                <div class="setup-instructions">
+                    <h3>📋 Setup Instructions</h3>
+                    <div class="setup-steps">
+                        <p><strong>1.</strong> Click the button below to open Google Apps Script</p>
+                        <p><strong>2.</strong> Create a new project</p>
+                        <p><strong>3.</strong> Delete the default <code>myFunction()</code> that appears in the editor</p>
+                        <p><strong>4.</strong> Copy the generated code using the button below, then paste it into the editor</p>
+                        <p><strong>5.</strong> Deploy as Web App: Click Deploy → New Deployment</p>
+                        <p><strong>6.</strong> Choose "Web app" as the type, set "Execute as" to "Me", and "Who has access" to "Anyone"</p>
+                        <p><strong>7.</strong> Click "Deploy" and authorize the app when prompted</p>
+                        <p style="background: #fef3c7; padding: 10px; border-radius: 5px; margin: 10px 0;"><strong>⚠️ Authorization Required:</strong> Google will show a warning "This app isn't verified." Click <strong>"Advanced"</strong> at the bottom left, then click <strong>"Go to [Your Project Name] (unsafe)"</strong> to proceed with authorization.</p>
+                        <p><strong>8.</strong> Copy the web app URL that appears (ends with <code>/exec</code>)</p>
+                        <p><strong>9.</strong> Go back to the code editor and find the line near the top: <span class="url-highlight">const WEB_APP_URL = "PASTE_YOUR_WEB_APP_URL_HERE";</span> and replace <code>PASTE_YOUR_WEB_APP_URL_HERE</code> with your actual web app URL</p>
+                        <p><strong>10.</strong> Run the <code>setupEmailScheduler</code> function</p>
+                        <p><strong>11.</strong> Authorize Gmail access when prompted (you'll see the same "This app isn't verified" warning - click <strong>"Advanced"</strong> and <strong>"Go to [Your Project Name] (unsafe)"</strong> again)</p>
+                        <p><strong>12.</strong> The setup function will verify everything and show you the results in the logs</p>
+                        <p><strong>13.</strong> Optionally run <code>sendTestEmail</code> to test immediately</p>
+                        <p style="margin-top: 15px;"><strong>📊 Useful Management Functions:</strong></p>
+                        <ul style="margin-left: 20px; color: #92400e;">
+                            <li><code>checkSeriesStatus()</code> - Check if your series is running and see progress</li>
+                            <li><code>testStopLink()</code> - Generate and test your stop links for troubleshooting</li>
+                            <li><code>resetScheduler()</code> - Reset the series back to the beginning if needed</li>
+                        </ul>
+                    </div>
+                    
+                    <button class="btn" onclick="openAppsScript()" style="margin: 15px 0;">
+                        🚀 Open Google Apps Script
+                    </button>
+                    
+                    <h4>Generated Code:</h4>
+                    <div class="code-block" id="generatedCode">
+                        <!-- Generated Apps Script code will appear here -->
+                    </div>
+                    <button class="copy-btn" onclick="copyCode()">📋 Copy Code Manually</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let fileData = null;
+        let processedChunks = [];
+        let bookTitle = '';
+
+        // Set default start date to tomorrow
+        document.getElementById('startDate').valueAsDate = new Date(Date.now() + 86400000);
+
+        // File upload handling
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+
+        uploadArea.addEventListener('click', function() { 
+            fileInput.click(); 
+        });
+        
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', function() {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            const maxSize = 50 * 1024 * 1024; // 50MB
+            const allowedTypes = ['application/pdf', 'application/epub+zip', 'text/plain'];
+            
+            if (file.size > maxSize) {
+                alert('File size must be less than 50MB');
+                return;
+            }
+            
+            if (!allowedTypes.includes(file.type) && !file.name.toLowerCase().endsWith('.epub')) {
+                alert('Please upload a PDF, ePub, or TXT file');
+                return;
+            }
+            
+            fileData = file;
+            bookTitle = file.name.replace(/\.[^/.]+$/, ""); // Remove file extension
+            
+            uploadArea.classList.add('has-file');
+            uploadArea.innerHTML = 
+                '<div class="upload-icon">✅</div>' +
+                '<div class="upload-text">File ready: ' + escapeHtml(file.name) + '</div>' +
+                '<div class="upload-hint">Size: ' + (file.size / 1024 / 1024).toFixed(2) + ' MB</div>';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function updateProgress(percent, text) {
+            document.getElementById('progressContainer').style.display = 'block';
+            document.getElementById('progressFill').style.width = percent + '%';
+            document.getElementById('progressText').textContent = text || 'Processing...';
+        }
+
+        async function processFile() {
+            if (!fileData) {
+                alert('Please upload a file first');
+                return;
+            }
+            
+            const email = document.getElementById('emailAddress').value;
+            if (!email) {
+                alert('Please enter an email address');
+                return;
+            }
+            
+            document.getElementById('processBtn').disabled = true;
+            updateProgress(0, 'Starting processing...');
+            
+            try {
+                if (fileData.type === 'application/pdf') {
+                    await processPDF();
+                } else if (fileData.name.toLowerCase().endsWith('.epub')) {
+                    await processEPub();
+                } else if (fileData.type === 'text/plain') {
+                    await processTXT();
+                }
+                
+                updateProgress(100, 'Processing complete!');
+                showResults();
+                generateAppsScript();
+                
+            } catch (error) {
+                console.error('Processing error:', error);
+                alert('Error processing file: ' + error.message);
+            } finally {
+                document.getElementById('processBtn').disabled = false;
+            }
+        }
+
+        async function processPDF() {
+            updateProgress(10, 'Loading PDF...');
+            
+            const arrayBuffer = await fileData.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            
+            updateProgress(30, 'Extracting text from PDF...');
+            
+            const pages = [];
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                
+                let pageText = '';
+                textContent.items.forEach(function(item) {
+                    pageText += item.str + ' ';
+                });
+                
+                if (pageText.trim()) {
+                    pages.push({
+                        content: pageText.trim(),
+                        title: 'Page ' + i
+                    });
+                }
+                
+                updateProgress(30 + (i / pdf.numPages) * 50, 'Processing page ' + i + ' of ' + pdf.numPages);
+            }
+            
+            updateProgress(80, 'Creating email chunks...');
+            
+            const chunkCount = parseInt(document.getElementById('chunkCount').value);
+            const pagesPerChunk = Math.ceil(pages.length / chunkCount);
+            
+            processedChunks = [];
+            for (let i = 0; i < chunkCount; i++) {
+                const startPage = i * pagesPerChunk;
+                const endPage = Math.min(startPage + pagesPerChunk, pages.length);
+                const chunkPages = pages.slice(startPage, endPage);
+                
+                if (chunkPages.length > 0) {
+                    const content = chunkPages.map(function(p) { return p.content; }).join('\n\n');
+                    processedChunks.push({
+                        title: 'Pages ' + (startPage + 1) + '-' + endPage,
+                        content: content,
+                        part: i + 1,
+                        total: chunkCount
+                    });
+                }
+            }
+        }
+
+        async function processEPub() {
+            updateProgress(10, 'Loading ePub...');
+            
+            const zip = await JSZip.loadAsync(fileData);
+            
+            updateProgress(30, 'Parsing ePub structure...');
+            
+            // Find content.opf file
+            let opfContent = null;
+            for (const filename in zip.files) {
+                if (filename.endsWith('.opf') || filename.includes('content.opf')) {
+                    opfContent = await zip.file(filename).async('text');
+                    break;
+                }
+            }
+            
+            if (!opfContent) {
+                throw new Error('Invalid ePub file - no content.opf found');
+            }
+            
+            updateProgress(50, 'Extracting chapters...');
+            
+            // Get all HTML/XHTML files
+            const htmlFiles = [];
+            for (const filename in zip.files) {
+                if (filename.endsWith('.html') || filename.endsWith('.xhtml')) {
+                    htmlFiles.push(filename);
+                }
+            }
+            
+            htmlFiles.sort();
+            
+            const chapters = [];
+            let startProcessing = false;
+            
+            for (let i = 0; i < htmlFiles.length; i++) {
+                const filename = htmlFiles[i];
+                const content = await zip.file(filename).async('text');
+                const textContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                
+                // Skip common front matter files
+                const lowerFilename = filename.toLowerCase();
+                const isSkippableFile = 
+                    lowerFilename.includes('title') ||
+                    lowerFilename.includes('copyright') ||
+                    lowerFilename.includes('toc') ||
+                    lowerFilename.includes('contents') ||
+                    lowerFilename.includes('cover') ||
+                    lowerFilename.includes('frontmatter') ||
+                    lowerFilename.includes('dedication') ||
+                    lowerFilename.includes('acknowledgment');
+                
+                const isShortContent = textContent.length < 500;
+                
+                const hasChapterIndicator = 
+                    textContent.toLowerCase().includes('chapter') ||
+                    textContent.toLowerCase().includes('part one') ||
+                    textContent.toLowerCase().includes('part 1') ||
+                    textContent.length > 2000;
+                
+                if (hasChapterIndicator && !isSkippableFile) {
+                    startProcessing = true;
+                }
+                
+                if (startProcessing && !isSkippableFile && !isShortContent && textContent.length > 100) {
+                    chapters.push({
+                        title: 'Chapter ' + (chapters.length + 1),
+                        content: textContent,
+                        filename: filename
+                    });
+                }
+                
+                updateProgress(50 + (i / htmlFiles.length) * 30, 'Processing file ' + (i + 1) + ' of ' + htmlFiles.length);
+            }
+            
+            // If we didn't find any "real" content, fall back to including everything substantial
+            if (chapters.length === 0) {
+                for (let i = 0; i < htmlFiles.length; i++) {
+                    const filename = htmlFiles[i];
+                    const content = await zip.file(filename).async('text');
+                    const textContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                    
+                    if (textContent && textContent.length > 500) {
+                        chapters.push({
+                            title: 'Chapter ' + (chapters.length + 1),
+                            content: textContent,
+                            filename: filename
+                        });
+                    }
+                }
+            }
+            
+            updateProgress(80, 'Creating email chunks...');
+            
+            const chunkCount = parseInt(document.getElementById('chunkCount').value);
+            const chaptersPerChunk = Math.ceil(chapters.length / chunkCount);
+            
+            processedChunks = [];
+            for (let i = 0; i < chunkCount; i++) {
+                const startChapter = i * chaptersPerChunk;
+                const endChapter = Math.min(startChapter + chaptersPerChunk, chapters.length);
+                const chunkChapters = chapters.slice(startChapter, endChapter);
+                
+                if (chunkChapters.length > 0) {
+                    const content = chunkChapters.map(function(c) { return c.content; }).join('\n\n---\n\n');
+                    processedChunks.push({
+                        title: 'Chapters ' + (startChapter + 1) + '-' + endChapter,
+                        content: content,
+                        part: i + 1,
+                        total: chunkCount
+                    });
+                }
+            }
+        }
+
+        async function processTXT() {
+            updateProgress(10, 'Reading text file...');
+            
+            const text = await fileData.text();
+            
+            updateProgress(30, 'Analyzing text structure...');
+            
+            const paragraphs = text.split(/\n\s*\n/).filter(function(p) { 
+                return p.trim().length > 0; 
+            });
+            
+            updateProgress(50, 'Creating email chunks...');
+            
+            const chunkCount = parseInt(document.getElementById('chunkCount').value);
+            const paragraphsPerChunk = Math.ceil(paragraphs.length / chunkCount);
+            
+            processedChunks = [];
+            for (let i = 0; i < chunkCount; i++) {
+                const startParagraph = i * paragraphsPerChunk;
+                const endParagraph = Math.min(startParagraph + paragraphsPerChunk, paragraphs.length);
+                const chunkParagraphs = paragraphs.slice(startParagraph, endParagraph);
+                
+                if (chunkParagraphs.length > 0) {
+                    const content = chunkParagraphs.join('\n\n');
+                    processedChunks.push({
+                        title: 'Part ' + (i + 1),
+                        content: content,
+                        part: i + 1,
+                        total: chunkCount
+                    });
+                }
+                
+                updateProgress(50 + (i / chunkCount) * 30, 'Creating chunk ' + (i + 1) + ' of ' + chunkCount);
+            }
+        }
+
+        function generateAppsScript() {
+            const email = document.getElementById('emailAddress').value;
+            const frequency = document.getElementById('frequency').value;
+            const timezone = document.getElementById('timezone').value;
+            const startDate = document.getElementById('startDate').value;
+            
+            console.log('Generating script with chunks:', processedChunks.length);
+            
+            // Create a simple minified JSON string for the chunks
+            let chunksArray = '[';
+            for (let i = 0; i < processedChunks.length; i++) {
+                if (i > 0) chunksArray += ',';
+                chunksArray += '{';
+                chunksArray += '"title":' + JSON.stringify(processedChunks[i].title) + ',';
+                chunksArray += '"content":' + JSON.stringify(processedChunks[i].content) + ',';
+                chunksArray += '"part":' + processedChunks[i].part + ',';
+                chunksArray += '"total":' + processedChunks[i].total;
+                chunksArray += '}';
+            }
+            chunksArray += ']';
+            
+            let scheduleCode;
+            if (frequency === 'daily') {
+                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(5).create();';
+            } else if (frequency === 'weekly') {
+                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(5).create();';
+            } else {
+                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(5).create();\n    ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(17).create();';
+            }
+            
+            const script = '// ========================================\n' +
+                '// IMPORTANT: PASTE YOUR WEB APP URL HERE\n' +
+                '// ========================================\n' +
+                '// After deploying this as a web app, copy the URL and paste it below:\n' +
+                'const WEB_APP_URL = "PASTE_YOUR_WEB_APP_URL_HERE";\n' +
+                '// Example: "https://script.google.com/macros/s/YOUR_ID/exec"\n\n' +
+                'function setupEmailScheduler() {\n' +
+                '  // Validate that web app URL has been configured\n' +
+                '  if (WEB_APP_URL === "PASTE_YOUR_WEB_APP_URL_HERE" || !WEB_APP_URL) {\n' +
+                '    throw new Error("Please update the WEB_APP_URL variable at the top of this script with your actual web app URL!");\n' +
+                '  }\n' +
+                '  \n' +
+                '  if (!WEB_APP_URL.includes("script.google.com") || !WEB_APP_URL.includes("/exec")) {\n' +
+                '    throw new Error("Invalid web app URL. Please make sure you copied the correct URL from the deployment (should end with /exec).");\n' +
+                '  }\n' +
+                '  \n' +
+                '  // Store all properties\n' +
+                '  PropertiesService.getScriptProperties().setProperties({\n' +
+                '    "RECIPIENT_EMAIL": ' + JSON.stringify(email) + ',\n' +
+                '    "BOOK_TITLE": ' + JSON.stringify(bookTitle) + ',\n' +
+                '    "CURRENT_PART": "0",\n' +
+                '    "TOTAL_PARTS": "' + processedChunks.length + '",\n' +
+                '    "START_DATE": ' + JSON.stringify(startDate) + ',\n' +
+                '    "TIMEZONE": ' + JSON.stringify(timezone) + ',\n' +
+                '    "WEB_APP_URL": WEB_APP_URL,\n' +
+                '    "SETUP_COMPLETE": "true"\n' +
+                '  });\n' +
+                '  \n' +
+                '  // Clear existing triggers\n' +
+                '  const existingTriggers = ScriptApp.getProjectTriggers();\n' +
+                '  existingTriggers.forEach(trigger => {\n' +
+                '    if (trigger.getHandlerFunction() === "sendNextEmail") {\n' +
+                '      ScriptApp.deleteTrigger(trigger);\n' +
+                '    }\n' +
+                '  });\n' +
+                '  \n' +
+                '  // Create new triggers\n' +
+                '  ' + scheduleCode + '\n' +
+                '  \n' +
+                '  Logger.log("✅ Email scheduler set up successfully!");\n' +
+                '  Logger.log("📧 Recipient: ' + email + '");\n' +
+                '  Logger.log("📚 Book: ' + bookTitle + '");\n' +
+                '  Logger.log("🔢 Total parts: ' + processedChunks.length + '");\n' +
+                '  Logger.log("🌐 Web App URL: " + WEB_APP_URL);\n' +
+                '  Logger.log("⏰ Schedule: ' + frequency + '");\n' +
+                '  Logger.log("");\n' +
+                '  Logger.log("🚀 Next steps:");\n' +
+                '  Logger.log("1. Run verifySetup() to confirm everything works");\n' +
+                '  Logger.log("2. Optionally run sendTestEmail() to test immediately");\n' +
+                '}\n\n' +
+                'function verifySetup() {\n' +
+                '  const props = PropertiesService.getScriptProperties();\n' +
+                '  const setupComplete = props.getProperty("SETUP_COMPLETE");\n' +
+                '  if (!setupComplete) {\n' +
+                '    Logger.log("❌ Setup not complete. Please run setupEmailScheduler() first.");\n' +
+                '    return false;\n' +
+                '  }\n' +
+                '  \n' +
+                '  // Check if WEB_APP_URL was properly configured\n' +
+                '  if (WEB_APP_URL === "PASTE_YOUR_WEB_APP_URL_HERE" || !WEB_APP_URL) {\n' +
+                '    Logger.log("❌ Web App URL not configured. Please update the WEB_APP_URL variable at the top of this script.");\n' +
+                '    return false;\n' +
+                '  }\n' +
+                '  \n' +
+                '  const triggers = ScriptApp.getProjectTriggers();\n' +
+                '  const emailTriggers = triggers.filter(t => t.getHandlerFunction() === "sendNextEmail");\n' +
+                '  \n' +
+                '  Logger.log("📊 Setup Verification Results:");\n' +
+                '  Logger.log("📧 Recipient Email: " + props.getProperty("RECIPIENT_EMAIL"));\n' +
+                '  Logger.log("📚 Book Title: " + props.getProperty("BOOK_TITLE"));\n' +
+                '  Logger.log("🔢 Total Parts: " + props.getProperty("TOTAL_PARTS"));\n' +
+                '  Logger.log("🌐 Web App URL: " + WEB_APP_URL);\n' +
+                '  Logger.log("⏰ Active Triggers: " + emailTriggers.length);\n' +
+                '  \n' +
+                '  if (emailTriggers.length === 0) {\n' +
+                '    Logger.log("⚠️ WARNING: No triggers found!");\n' +
+                '    return false;\n' +
+                '  }\n' +
+                '  \n' +
+                '  try {\n' +
+                '    GmailApp.getAliases();\n' +
+                '    Logger.log("📨 Gmail Access: ✅ Working");\n' +
+                '  } catch (error) {\n' +
+                '    Logger.log("📨 Gmail Access: ❌ Failed - " + error.toString());\n' +
+                '    return false;\n' +
+                '  }\n' +
+                '  \n' +
+                '  Logger.log("🎉 All checks passed! Email scheduler is ready to go.");\n' +
+                '  Logger.log("🔗 Stop links will use: " + WEB_APP_URL);\n' +
+                '  return true;\n' +
+                '}\n\n' +
+                'function getEmailContent(partNumber) {\n' +
+                '  const emailContents = ' + chunksArray + ';\n' +
+                '  return emailContents.find(chunk => chunk.part === partNumber);\n' +
+                '}\n\n' +
+                'function sendEmail(recipientEmail, emailData, partNumber, totalParts, bookTitle) {\n' +
+                '  const subject = bookTitle + " - Part " + partNumber + " of " + totalParts;\n' +
+                '  \n' +
+                '  // Simple stop URL - just pass the email, we will verify it in doGet\n' +
+                '  const stopUrl = WEB_APP_URL + "?stop=" + encodeURIComponent(recipientEmail);\n' +
+                '  \n' +
+                '  const htmlBody = "<!DOCTYPE html><html><head><style>body{font-family:Georgia,serif;line-height:1.6;max-width:600px;margin:0 auto;padding:20px}.header{background:#4f46e5;color:white;padding:20px;border-radius:10px;margin-bottom:20px;text-align:center}.progress{background:#f3f4f6;padding:15px;border-radius:8px;margin-bottom:20px}.content{font-size:16px;line-height:1.8}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:14px}.stop-link{background:#ef4444;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;font-size:12px}.stop-section{text-align:center;margin-top:20px;padding:15px;background:#fef2f2;border-radius:8px}.incognito-note{background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;margin:10px 0;font-size:11px;color:#9a3412}</style></head><body><div class=\\"header\\"><h1>" + bookTitle + "</h1><p>Part " + partNumber + " of " + totalParts + "</p></div><div class=\\"progress\\"><strong>Reading Progress:</strong> " + Math.round((partNumber / totalParts) * 100) + "% complete<br><strong>Section:</strong> " + emailData.title + "<br><strong>Estimated completion:</strong> " + (totalParts - partNumber) + " emails remaining</div><div class=\\"content\\">" + emailData.content.replace(/\\n\\n/g, "</p><p>").replace(/^/, "<p>").replace(/$/, "</p>") + "</div><div class=\\"footer\\"><p>This is part " + partNumber + " of " + totalParts + " of your personalized reading series.</p><p>Generated by Book Email Scheduler</p><div class=\\"stop-section\\"><p><strong>Want to stop receiving these emails?</strong></p><a href=\\"" + stopUrl + "\\" class=\\"stop-link\\">Stop Email Series</a><div class=\\"incognito-note\\"><strong>Multiple Google Accounts?</strong><br>If the stop link does not work, copy this URL and paste it into an <strong>incognito/private browser window</strong>:<br><code style=\\"background:#f3f4f6;padding:2px 4px;border-radius:3px;font-size:10px;word-break:break-all\\">" + stopUrl + "</code></div><p style=\\"font-size:11px;margin-top:10px\\">This will immediately cancel all remaining emails in this series.</p></div></div></body></html>";\n' +
+                '  \n' +
+                '  GmailApp.sendEmail(recipientEmail, subject, "", { htmlBody: htmlBody, name: "Book Email Scheduler" });\n' +
+                '}\n\n' +
+                'function sendNextEmail() {\n' +
+                '  const props = PropertiesService.getScriptProperties();\n' +
+                '  \n' +
+                '  if (props.getProperty("SERIES_STOPPED") === "true") {\n' +
+                '    Logger.log("📧 Email series was stopped by user. Cleaning up...");\n' +
+                '    const triggers = ScriptApp.getProjectTriggers();\n' +
+                '    triggers.forEach(trigger => {\n' +
+                '      if (trigger.getHandlerFunction() === "sendNextEmail") {\n' +
+                '        ScriptApp.deleteTrigger(trigger);\n' +
+                '      }\n' +
+                '    });\n' +
+                '    return;\n' +
+                '  }\n' +
+                '  \n' +
+                '  const currentPart = parseInt(props.getProperty("CURRENT_PART")) || 0;\n' +
+                '  const totalParts = parseInt(props.getProperty("TOTAL_PARTS"));\n' +
+                '  const recipientEmail = props.getProperty("RECIPIENT_EMAIL");\n' +
+                '  const bookTitle = props.getProperty("BOOK_TITLE");\n' +
+                '  \n' +
+                '  if (currentPart >= totalParts) {\n' +
+                '    Logger.log("🎉 All emails have been sent! Series complete.");\n' +
+                '    const triggers = ScriptApp.getProjectTriggers();\n' +
+                '    triggers.forEach(trigger => {\n' +
+                '      if (trigger.getHandlerFunction() === "sendNextEmail") {\n' +
+                '        ScriptApp.deleteTrigger(trigger);\n' +
+                '      }\n' +
+                '    });\n' +
+                '    sendCompletionEmail(recipientEmail, bookTitle);\n' +
+                '    return;\n' +
+                '  }\n' +
+                '  \n' +
+                '  const nextPart = currentPart + 1;\n' +
+                '  const emailData = getEmailContent(nextPart);\n' +
+                '  \n' +
+                '  if (emailData) {\n' +
+                '    sendEmail(recipientEmail, emailData, nextPart, totalParts, bookTitle);\n' +
+                '    props.setProperty("CURRENT_PART", nextPart.toString());\n' +
+                '    Logger.log("📧 Sent email part " + nextPart + " of " + totalParts);\n' +
+                '  }\n' +
+                '}\n\n' +
+                'function sendTestEmail() {\n' +
+                '  const props = PropertiesService.getScriptProperties();\n' +
+                '  const recipientEmail = props.getProperty("RECIPIENT_EMAIL");\n' +
+                '  const bookTitle = props.getProperty("BOOK_TITLE");\n' +
+                '  const totalParts = parseInt(props.getProperty("TOTAL_PARTS"));\n' +
+                '  \n' +
+                '  if (!recipientEmail || !bookTitle) {\n' +
+                '    Logger.log("❌ Setup not complete. Run setupEmailScheduler() first.");\n' +
+                '    return;\n' +
+                '  }\n' +
+                '  \n' +
+                '  const emailData = getEmailContent(1);\n' +
+                '  if (emailData) {\n' +
+                '    sendEmail(recipientEmail, emailData, 1, totalParts, bookTitle);\n' +
+                '    Logger.log("✅ Test email sent successfully to: " + recipientEmail);\n' +
+                '  } else {\n' +
+                '    Logger.log("❌ Could not find email content for part 1");\n' +
+                '  }\n' +
+                '}\n\n' +
+                'function doGet(e) {\n' +
+                '  const params = e ? e.parameter : {};\n' +
+                '  const stopEmail = params.stop;\n' +
+                '  \n' +
+                '  // If this is a stop request\n' +
+                '  if (stopEmail) {\n' +
+                '    const props = PropertiesService.getScriptProperties();\n' +
+                '    const storedEmail = props.getProperty("RECIPIENT_EMAIL");\n' +
+                '    \n' +
+                '    // Simple email check\n' +
+                '    if (stopEmail === storedEmail) {\n' +
+                '      // Stop the series\n' +
+                '      props.setProperty("SERIES_STOPPED", "true");\n' +
+                '      \n' +
+                '      // Delete triggers\n' +
+                '      const triggers = ScriptApp.getProjectTriggers();\n' +
+                '      triggers.forEach(trigger => {\n' +
+                '        if (trigger.getHandlerFunction() === "sendNextEmail") {\n' +
+                '          ScriptApp.deleteTrigger(trigger);\n' +
+                '        }\n' +
+                '      });\n' +
+                '      \n' +
+                '      // Success page\n' +
+                '      const html = "<!DOCTYPE html><html><head><title>Email Series Stopped</title></head>" +\n' +
+                '        "<body style=\\"font-family:Arial,sans-serif;text-align:center;padding:50px;background:#f0f9ff\\">" +\n' +
+                '        "<div style=\\"max-width:500px;margin:0 auto;background:white;padding:40px;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.1)\\">" +\n' +
+                '        "<h1 style=\\"color:#059669;margin-bottom:20px\\">✅ Email Series Stopped</h1>" +\n' +
+                '        "<p style=\\"color:#374151;font-size:18px;line-height:1.5;margin-bottom:15px\\">Your book email series has been successfully cancelled.</p>" +\n' +
+                '        "<p style=\\"color:#6b7280;font-size:16px\\">No more emails will be sent for this series.</p>" +\n' +
+                '        "<p style=\\"color:#9ca3af;font-size:14px;margin-top:30px\\">You can close this page.</p>" +\n' +
+                '        "</div></body></html>";\n' +
+                '      \n' +
+                '      return HtmlService.createHtmlOutput(html);\n' +
+                '    } else {\n' +
+                '      // Debug info if emails do not match\n' +
+                '      const html = "<!DOCTYPE html><html><head><title>Debug Info</title></head>" +\n' +
+                '        "<body style=\\"font-family:Arial,sans-serif;text-align:center;padding:50px;background:#fef2f2\\">" +\n' +
+                '        "<div style=\\"max-width:500px;margin:0 auto;background:white;padding:40px;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.1)\\">" +\n' +
+                '        "<h1 style=\\"color:#dc2626;margin-bottom:20px\\">Email Mismatch</h1>" +\n' +
+                '        "<p><strong>URL Email:</strong> " + stopEmail + "</p>" +\n' +
+                '        "<p><strong>Stored Email:</strong> " + (storedEmail || "Not found") + "</p>" +\n' +
+                '        "<p><strong>Match:</strong> " + (stopEmail === storedEmail) + "</p>" +\n' +
+                '        "<p>Run checkSeriesStatus() in your script to see current settings.</p>" +\n' +
+                '        "</div></body></html>";\n' +
+                '      \n' +
+                '      return HtmlService.createHtmlOutput(html);\n' +
+                '    }\n' +
+                '  }\n' +
+                '  \n' +
+                '  // Default page\n' +
+                '  const html = "<!DOCTYPE html><html><head><title>Book Email Scheduler</title></head>" +\n' +
+                '    "<body style=\\"font-family:Arial,sans-serif;text-align:center;padding:50px;background:#f9fafb\\">" +\n' +
+                '    "<div style=\\"max-width:500px;margin:0 auto;background:white;padding:40px;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.1)\\">" +\n' +
+                '    "<h1 style=\\"color:#374151;margin-bottom:20px\\">📚 Book Email Scheduler</h1>" +\n' +
+                '    "<p style=\\"color:#6b7280;font-size:16px;line-height:1.5\\">This web app manages your book email series.</p>" +\n' +
+                '    "<p style=\\"color:#9ca3af;font-size:14px;margin-top:20px\\">If you need to stop your email series, please use the link provided in your emails.</p>" +\n' +
+                '    "</div></body></html>";\n' +
+                '  \n' +
+                '  return HtmlService.createHtmlOutput(html);\n' +
+                '}\n\n' +
+                'function sendCompletionEmail(recipientEmail, bookTitle) {\n' +
+                '  const subject = "Completed: " + bookTitle + " - Reading Series Finished!";\n' +
+                '  const htmlBody = "<!DOCTYPE html><html><head><style>body{font-family:Georgia,serif;line-height:1.6;max-width:600px;margin:0 auto;padding:20px}.header{background:linear-gradient(135deg,#10b981,#059669);color:white;padding:30px;border-radius:10px;margin-bottom:20px;text-align:center}.content{font-size:16px;line-height:1.8;text-align:center;padding:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:14px;text-align:center}</style></head><body><div class=\\"header\\"><h1>🎉 Congratulations!</h1><h2>" + bookTitle + "</h2><p>Reading Series Complete</p></div><div class=\\"content\\"><p>You have successfully completed your email reading series!</p><p>We hope you enjoyed this unique way of consuming \\"" + bookTitle + "\\" over time.</p><p><strong>Happy Reading! 📚</strong></p></div><div class=\\"footer\\"><p>Generated by Book Email Scheduler</p></div></body></html>";\n' +
+                '  \n' +
+                '  GmailApp.sendEmail(recipientEmail, subject, "", { htmlBody: htmlBody, name: "Book Email Scheduler" });\n' +
+                '  Logger.log("🎉 Completion email sent!");\n' +
+                '}\n\n' +
+                'function checkSeriesStatus() {\n' +
+                '  const props = PropertiesService.getScriptProperties();\n' +
+                '  const setupComplete = props.getProperty("SETUP_COMPLETE");\n' +
+                '  \n' +
+                '  if (!setupComplete) {\n' +
+                '    Logger.log("❌ Email scheduler not set up yet. Run setupEmailScheduler() first.");\n' +
+                '    return;\n' +
+                '  }\n' +
+                '  \n' +
+                '  const currentPart = parseInt(props.getProperty("CURRENT_PART")) || 0;\n' +
+                '  const totalParts = parseInt(props.getProperty("TOTAL_PARTS"));\n' +
+                '  const recipientEmail = props.getProperty("RECIPIENT_EMAIL");\n' +
+                '  const bookTitle = props.getProperty("BOOK_TITLE");\n' +
+                '  const seriesStopped = props.getProperty("SERIES_STOPPED") === "true";\n' +
+                '  const webAppUrl = props.getProperty("WEB_APP_URL");\n' +
+                '  \n' +
+                '  // Check for active triggers\n' +
+                '  const triggers = ScriptApp.getProjectTriggers();\n' +
+                '  const emailTriggers = triggers.filter(t => t.getHandlerFunction() === "sendNextEmail");\n' +
+                '  \n' +
+                '  Logger.log("📊 EMAIL SERIES STATUS REPORT");\n' +
+                '  Logger.log("================================");\n' +
+                '  Logger.log("📚 Book: " + bookTitle);\n' +
+                '  Logger.log("📧 Recipient: " + recipientEmail);\n' +
+                '  Logger.log("📈 Progress: " + currentPart + " of " + totalParts + " emails sent (" + Math.round((currentPart / totalParts) * 100) + "%)");\n' +
+                '  Logger.log("📅 Remaining: " + (totalParts - currentPart) + " emails");\n' +
+                '  Logger.log("🎯 Status: " + (seriesStopped ? "❌ STOPPED by user" : (currentPart >= totalParts ? "✅ COMPLETED" : "🟢 ACTIVE")));\n' +
+                '  Logger.log("⏰ Active Triggers: " + emailTriggers.length);\n' +
+                '  Logger.log("🌐 Web App URL: " + (webAppUrl || "Not set"));\n' +
+                '  Logger.log("================================");\n' +
+                '  \n' +
+                '  if (seriesStopped) {\n' +
+                '    Logger.log("ℹ️ Series was stopped by user. No more emails will be sent.");\n' +
+                '  } else if (currentPart >= totalParts) {\n' +
+                '    Logger.log("🎉 Series completed! All emails have been sent.");\n' +
+                '  } else if (emailTriggers.length === 0) {\n' +
+                '    Logger.log("⚠️ WARNING: Series should be active but no triggers found!");\n' +
+                '    Logger.log("💡 Suggestion: Run setupEmailScheduler() to restart triggers.");\n' +
+                '  } else {\n' +
+                '    Logger.log("✅ Series is active and running normally.");\n' +
+                '  }\n' +
+                '}\n\n' +
+                'function testStopLink() {\n' +
+                '  const props = PropertiesService.getScriptProperties();\n' +
+                '  const recipientEmail = props.getProperty("RECIPIENT_EMAIL");\n' +
+                '  const webAppUrl = props.getProperty("WEB_APP_URL");\n' +
+                '  const setupComplete = props.getProperty("SETUP_COMPLETE");\n' +
+                '  \n' +
+                '  if (!setupComplete) {\n' +
+                '    Logger.log("❌ Email scheduler not set up yet. Run setupEmailScheduler() first.");\n' +
+                '    return;\n' +
+                '  }\n' +
+                '  \n' +
+                '  if (!recipientEmail) {\n' +
+                '    Logger.log("❌ No recipient email found. Check your setup.");\n' +
+                '    return;\n' +
+                '  }\n' +
+                '  \n' +
+                '  if (!webAppUrl || webAppUrl === "PASTE_YOUR_WEB_APP_URL_HERE") {\n' +
+                '    Logger.log("❌ Web app URL not configured. Update the WEB_APP_URL variable.");\n' +
+                '    return;\n' +
+                '  }\n' +
+                '  \n' +
+                '  // Generate the stop URL exactly as it appears in emails\n' +
+                '  const stopUrl = webAppUrl + "?stop=" + encodeURIComponent(recipientEmail);\n' +
+                '  \n' +
+                '  Logger.log("🔗 STOP LINK TEST");\n' +
+                '  Logger.log("==================");\n' +
+                '  Logger.log("📧 Email: " + recipientEmail);\n' +
+                '  Logger.log("🌐 Web App URL: " + webAppUrl);\n' +
+                '  Logger.log("🔗 Stop URL: " + stopUrl);\n' +
+                '  Logger.log("==================");\n' +
+                '  Logger.log("");\n' +
+                '  Logger.log("✅ TESTING INSTRUCTIONS:");\n' +
+                '  Logger.log("1. Copy the Stop URL above");\n' +
+                '  Logger.log("2. Open an incognito/private browser window");\n' +
+                '  Logger.log("3. Paste the URL and press Enter");\n' +
+                '  Logger.log("4. You should see a success page if it works");\n' +
+                '  Logger.log("");\n' +
+                '  Logger.log("⚠️ TROUBLESHOOTING:");\n' +
+                '  Logger.log("- If you get an error, try incognito mode");\n' +
+                '  Logger.log("- Make sure you are signed into the Google account that owns this script");\n' +
+                '  Logger.log("- Check that the web app deployment has access set to Anyone");\n' +
+                '  \n' +
+                '  return stopUrl;\n' +
+                '}\n\n' +
+                'function resetScheduler() {\n' +
+                '  const props = PropertiesService.getScriptProperties();\n' +
+                '  props.setProperty("CURRENT_PART", "0");\n' +
+                '  props.deleteProperty("SERIES_STOPPED");\n' +
+                '  Logger.log("🔄 Email scheduler reset to beginning");\n' +
+                '}';
+            
+            document.getElementById('generatedCode').textContent = script;
+        }
+
+        function showResults() {
+            if (processedChunks.length > 0) {
+                console.log('Showing results for', processedChunks.length, 'chunks');
+                
+                const preview = processedChunks[0];
+                const safeTitle = escapeHtml(preview.title);
+                const safeContent = escapeHtml(preview.content.substring(0, 500));
+                const truncated = preview.content.length > 500 ? '...' : '';
+                
+                document.getElementById('chunkPreview').innerHTML = 
+                    '<h5>' + safeTitle + '</h5>' +
+                    '<p>' + safeContent + truncated + '</p>';
+            }
+            
+            document.getElementById('resultArea').style.display = 'block';
+        }
+
+        function copyCode() {
+            const code = document.getElementById('generatedCode').textContent;
+            
+            const textArea = document.createElement('textarea');
+            textArea.value = code;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                const btn = document.querySelector('.copy-btn');
+                if (successful) {
+                    btn.textContent = '✅ Copied!';
+                    setTimeout(function() {
+                        btn.textContent = '📋 Copy Code Manually';
+                    }, 2000);
+                } else {
+                    // Fallback: select the code block text for manual copying
+                    const codeBlock = document.getElementById('generatedCode');
+                    const range = document.createRange();
+                    range.selectNode(codeBlock);
+                    window.getSelection().removeAllRanges();
+                    window.getSelection().addRange(range);
+                    
+                    btn.textContent = '📝 Code Selected - Press Ctrl+C';
+                    setTimeout(function() {
+                        btn.textContent = '📋 Copy Code Manually';
+                    }, 3000);
+                }
+            } catch (err) {
+                // Fallback: select the code block text for manual copying
+                const codeBlock = document.getElementById('generatedCode');
+                const range = document.createRange();
+                range.selectNode(codeBlock);
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+                
+                const btn = document.querySelector('.copy-btn');
+                btn.textContent = '📝 Code Selected - Press Ctrl+C';
+                setTimeout(function() {
+                    btn.textContent = '📋 Copy Code Manually';
+                }, 3000);
+            }
+            
+            document.body.removeChild(textArea);
+        }
+
+        function openAppsScript() {
+            window.open('https://script.google.com/create', '_blank');
+        }
+    </script>
+</body>
+</html>
