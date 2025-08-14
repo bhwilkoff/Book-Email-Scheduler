@@ -338,7 +338,7 @@
                 
                 <div class="form-group">
                     <label for="frequency">Email Frequency</label>
-                    <select id="frequency">
+                    <select id="frequency" onchange="updateTimeFields()">
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
                         <option value="morning-night">Morning & Night</option>
@@ -357,6 +357,16 @@
                         <option value="Asia/Tokyo">Tokyo</option>
                         <option value="Australia/Sydney">Sydney</option>
                     </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="emailTime">Email Time</label>
+                    <input type="time" id="emailTime" value="05:00">
+                </div>
+                
+                <div class="form-group" id="nightTimeGroup" style="display: none;">
+                    <label for="nightTime">Night Email Time</label>
+                    <input type="time" id="nightTime" value="17:00">
                 </div>
                 
                 <div class="form-group">
@@ -434,6 +444,24 @@
 
         // Set default start date to tomorrow
         document.getElementById('startDate').valueAsDate = new Date(Date.now() + 86400000);
+
+        // Initialize time fields visibility
+        updateTimeFields();
+
+        // Show/hide night time field based on frequency selection
+        function updateTimeFields() {
+            const frequency = document.getElementById('frequency').value;
+            const nightTimeGroup = document.getElementById('nightTimeGroup');
+            const emailTimeLabel = document.querySelector('label[for="emailTime"]');
+            
+            if (frequency === 'morning-night') {
+                nightTimeGroup.style.display = 'block';
+                emailTimeLabel.textContent = 'Morning Email Time';
+            } else {
+                nightTimeGroup.style.display = 'none';
+                emailTimeLabel.textContent = 'Email Time';
+            }
+        }
 
         // File upload handling
         const uploadArea = document.getElementById('uploadArea');
@@ -746,8 +774,14 @@
             const frequency = document.getElementById('frequency').value;
             const timezone = document.getElementById('timezone').value;
             const startDate = document.getElementById('startDate').value;
+            const emailTime = document.getElementById('emailTime').value;
+            const nightTime = document.getElementById('nightTime').value;
             
             console.log('Generating script with chunks:', processedChunks.length);
+            
+            // Parse time values
+            const [emailHour, emailMinute] = emailTime.split(':').map(Number);
+            const [nightHour, nightMinute] = nightTime.split(':').map(Number);
             
             // Create a simple minified JSON string for the chunks
             let chunksArray = '[';
@@ -764,11 +798,11 @@
             
             let scheduleCode;
             if (frequency === 'daily') {
-                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(5).create();';
+                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(' + emailHour + ').create();';
             } else if (frequency === 'weekly') {
-                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(5).create();';
+                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(' + emailHour + ').create();';
             } else {
-                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(5).create();\n    ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(17).create();';
+                scheduleCode = 'ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(' + emailHour + ').create();\n    ScriptApp.newTrigger("sendNextEmail").timeBased().everyDays(1).atHour(' + nightHour + ').create();';
             }
             
             const script = '// ========================================\n' +
@@ -815,7 +849,7 @@
                 '  Logger.log("📚 Book: ' + bookTitle + '");\n' +
                 '  Logger.log("🔢 Total parts: ' + processedChunks.length + '");\n' +
                 '  Logger.log("🌐 Web App URL: " + WEB_APP_URL);\n' +
-                '  Logger.log("⏰ Schedule: ' + frequency + '");\n' +
+                '  Logger.log("⏰ Schedule: ' + frequency + ' at ' + emailTime + (frequency === 'morning-night' ? ' and ' + nightTime : '') + '");\n' +
                 '  Logger.log("");\n' +
                 '  Logger.log("🚀 Next steps:");\n' +
                 '  Logger.log("1. Run verifySetup() to confirm everything works");\n' +
