@@ -580,15 +580,64 @@
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
                 
+                // Enhanced text extraction with positioning info
+                const textItems = textContent.items;
                 let pageText = '';
-                textContent.items.forEach(function(item) {
-                    pageText += item.str + ' ';
+                let lastY = null;
+                let lastX = null;
+                
+                // Sort items by position (top to bottom, left to right)
+                textItems.sort((a, b) => {
+                    if (Math.abs(a.transform[5] - b.transform[5]) > 5) {
+                        return b.transform[5] - a.transform[5]; // Top to bottom
+                    }
+                    return a.transform[4] - b.transform[4]; // Left to right
                 });
+                
+                for (let j = 0; j < textItems.length; j++) {
+                    const item = textItems[j];
+                    const x = item.transform[4];
+                    const y = item.transform[5];
+                    const text = item.str.trim();
+                    
+                    if (!text) continue;
+                    
+                    // Detect paragraph breaks based on positioning
+                    if (lastY !== null) {
+                        const yDiff = Math.abs(lastY - y);
+                        const xDiff = Math.abs(lastX - x);
+                        
+                        // Large vertical gap suggests paragraph break
+                        if (yDiff > item.height * 1.5) {
+                            pageText += '\n\n';
+                        }
+                        // New line with significant left indent suggests new paragraph
+                        else if (yDiff > item.height * 0.5 && x > lastX + 50) {
+                            pageText += '\n\n';
+                        }
+                        // Regular line break
+                        else if (yDiff > item.height * 0.5) {
+                            pageText += '\n';
+                        }
+                        // Same line, add space
+                        else if (xDiff > item.width) {
+                            pageText += ' ';
+                        }
+                    }
+                    
+                    pageText += text;
+                    lastY = y;
+                    lastX = x + item.width;
+                }
+                
+                // Clean up the extracted text
+                pageText = cleanupPdfText(pageText);
                 
                 if (pageText.trim()) {
                     pages.push({
                         content: pageText.trim(),
-                        title: 'Page ' + i
+                        title: 'Page ' + i,
+                        pageNumber: i
                     });
                 }
                 
@@ -607,7 +656,11 @@
                 const chunkPages = pages.slice(startPage, endPage);
                 
                 if (chunkPages.length > 0) {
-                    const content = chunkPages.map(function(p) { return p.content; }).join('\n\n');
+                    // Join pages with clear separation
+                    const content = chunkPages.map(function(p) { 
+                        return p.content; 
+                    }).join('\n\n---\n\n');
+                    
                     processedChunks.push({
                         title: 'Pages ' + (startPage + 1) + '-' + endPage,
                         content: content,
@@ -618,6 +671,22 @@
             }
         }
 
+        function cleanupPdfText(text) {
+            return text
+                // Fix common PDF extraction issues
+                .replace(/([a-z])([A-Z])/g, '$1 $2') // Add space between camelCase
+                .replace(/([.!?])\s*([A-Z])/g, '$1\n\n$2') // Paragraph break after sentences starting new topics
+                .replace(/\n{3,}/g, '\n\n') // No more than 2 consecutive newlines
+                .replace(/[ \t]+/g, ' ') // Collapse multiple spaces
+                .replace(/\n /g, '\n') // Remove spaces at start of lines
+                .replace(/ \n/g, '\n') // Remove spaces at end of lines
+                // Fix hyphenated words at line breaks
+                .replace(/(\w+)-\n(\w+)/g, '$1$2')
+                // Remove single letters on their own lines (common PDF artifacts)
+                .replace(/\n[a-zA-Z]\n/g, '\n')
+                .trim();
+        }
+
         async function processEPub() {
             updateProgress(10, 'Loading ePub...');
             
@@ -625,11 +694,13 @@
             
             updateProgress(30, 'Parsing ePub structure...');
             
-            // Find content.opf file
+            // Find content.opf file to get proper reading order
             let opfContent = null;
+            let opfPath = null;
             for (const filename in zip.files) {
                 if (filename.endsWith('.opf') || filename.includes('content.opf')) {
                     opfContent = await zip.file(filename).async('text');
+                    opfPath = filename;
                     break;
                 }
             }
@@ -638,25 +709,51 @@
                 throw new Error('Invalid ePub file - no content.opf found');
             }
             
-            updateProgress(50, 'Extracting chapters...');
+            updateProgress(40, 'Reading table of contents...');
             
-            // Get all HTML/XHTML files
-            const htmlFiles = [];
-            for (const filename in zip.files) {
-                if (filename.endsWith('.html') || filename.endsWith('.xhtml')) {
-                    htmlFiles.push(filename);
+            // Parse OPF to get spine order (proper reading sequence)
+            const parser = new DOMParser();
+            const opfDoc = parser.parseFromString(opfContent, 'text/xml');
+            const spineItems = Array.from(opfDoc.querySelectorAll('spine itemref'));
+            const manifestItems = {};
+            
+            // Build manifest lookup
+            Array.from(opfDoc.querySelectorAll('manifest item')).forEach(item => {
+                manifestItems[item.getAttribute('id')] = item.getAttribute('href');
+            });
+            
+            // Get files in spine order
+            const orderedFiles = [];
+            const opfDir = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
+            
+            spineItems.forEach(item => {
+                const idref = item.getAttribute('idref');
+                if (manifestItems[idref]) {
+                    const href = manifestItems[idref];
+                    const fullPath = opfDir + href;
+                    if (zip.files[fullPath]) {
+                        orderedFiles.push(fullPath);
+                    }
                 }
+            });
+            
+            // Fallback: if no spine found, use alphabetical HTML files
+            if (orderedFiles.length === 0) {
+                for (const filename in zip.files) {
+                    if (filename.endsWith('.html') || filename.endsWith('.xhtml')) {
+                        orderedFiles.push(filename);
+                    }
+                }
+                orderedFiles.sort();
             }
             
-            htmlFiles.sort();
+            updateProgress(50, 'Processing chapters...');
             
             const chapters = [];
-            let startProcessing = false;
             
-            for (let i = 0; i < htmlFiles.length; i++) {
-                const filename = htmlFiles[i];
+            for (let i = 0; i < orderedFiles.length; i++) {
+                const filename = orderedFiles[i];
                 const content = await zip.file(filename).async('text');
-                const textContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
                 
                 // Skip common front matter files
                 const lowerFilename = filename.toLowerCase();
@@ -670,44 +767,42 @@
                     lowerFilename.includes('dedication') ||
                     lowerFilename.includes('acknowledgment');
                 
-                const isShortContent = textContent.length < 500;
-                
-                const hasChapterIndicator = 
-                    textContent.toLowerCase().includes('chapter') ||
-                    textContent.toLowerCase().includes('part one') ||
-                    textContent.toLowerCase().includes('part 1') ||
-                    textContent.length > 2000;
-                
-                if (hasChapterIndicator && !isSkippableFile) {
-                    startProcessing = true;
+                if (isSkippableFile) {
+                    continue;
                 }
                 
-                if (startProcessing && !isSkippableFile && !isShortContent && textContent.length > 100) {
+                // Enhanced HTML to text conversion preserving structure
+                const structuredText = convertHtmlToStructuredText(content);
+                
+                // Only include if substantial content
+                if (structuredText.trim().length > 200) {
+                    // Try to extract chapter title from content
+                    const lines = structuredText.split('\n').filter(line => line.trim());
+                    let chapterTitle = null;
+                    
+                    // Look for chapter heading in first few lines
+                    for (let j = 0; j < Math.min(5, lines.length); j++) {
+                        const line = lines[j].trim();
+                        if (line.length < 100 && (
+                            line.toLowerCase().includes('chapter') ||
+                            line.toLowerCase().includes('part ') ||
+                            line.match(/^[IVX]+\.?\s/) || // Roman numerals
+                            line.match(/^\d+\.?\s/) || // Numbers
+                            line.length < 50 // Short lines likely to be titles
+                        )) {
+                            chapterTitle = line;
+                            break;
+                        }
+                    }
+                    
                     chapters.push({
-                        title: 'Chapter ' + (chapters.length + 1),
-                        content: textContent,
+                        title: chapterTitle || `Chapter ${chapters.length + 1}`,
+                        content: structuredText,
                         filename: filename
                     });
                 }
                 
-                updateProgress(50 + (i / htmlFiles.length) * 30, 'Processing file ' + (i + 1) + ' of ' + htmlFiles.length);
-            }
-            
-            // If we didn't find any "real" content, fall back to including everything substantial
-            if (chapters.length === 0) {
-                for (let i = 0; i < htmlFiles.length; i++) {
-                    const filename = htmlFiles[i];
-                    const content = await zip.file(filename).async('text');
-                    const textContent = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-                    
-                    if (textContent && textContent.length > 500) {
-                        chapters.push({
-                            title: 'Chapter ' + (chapters.length + 1),
-                            content: textContent,
-                            filename: filename
-                        });
-                    }
-                }
+                updateProgress(50 + (i / orderedFiles.length) * 30, 'Processing file ' + (i + 1) + ' of ' + orderedFiles.length);
             }
             
             updateProgress(80, 'Creating email chunks...');
@@ -722,15 +817,130 @@
                 const chunkChapters = chapters.slice(startChapter, endChapter);
                 
                 if (chunkChapters.length > 0) {
-                    const content = chunkChapters.map(function(c) { return c.content; }).join('\n\n---\n\n');
+                    // Format content with proper chapter separation
+                    const formattedContent = chunkChapters.map(chapter => {
+                        if (chapter.title) {
+                            return `## ${chapter.title}\n\n${chapter.content}`;
+                        }
+                        return chapter.content;
+                    }).join('\n\n---\n\n');
+                    
                     processedChunks.push({
-                        title: 'Chapters ' + (startChapter + 1) + '-' + endChapter,
-                        content: content,
+                        title: chunkChapters.length === 1 ? 
+                            chunkChapters[0].title : 
+                            `Chapters ${startChapter + 1}-${endChapter}`,
+                        content: formattedContent,
                         part: i + 1,
                         total: chunkCount
                     });
                 }
             }
+        }
+
+        function convertHtmlToStructuredText(html) {
+            // Create a temporary DOM element to parse HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            
+            // Function to process nodes recursively
+            function processNode(node) {
+                let result = '';
+                
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const text = node.textContent.trim();
+                    if (text) {
+                        result += text + ' ';
+                    }
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    const tagName = node.tagName.toLowerCase();
+                    
+                    // Handle different HTML elements
+                    switch (tagName) {
+                        case 'h1':
+                        case 'h2':
+                        case 'h3':
+                        case 'h4':
+                        case 'h5':
+                        case 'h6':
+                            // Headings get double line breaks before and after
+                            result += '\n\n' + node.textContent.trim() + '\n\n';
+                            break;
+                            
+                        case 'p':
+                        case 'div':
+                            // Paragraphs get line breaks
+                            const childText = Array.from(node.childNodes)
+                                .map(child => processNode(child))
+                                .join('').trim();
+                            if (childText) {
+                                result += childText + '\n\n';
+                            }
+                            break;
+                            
+                        case 'br':
+                            result += '\n';
+                            break;
+                            
+                        case 'li':
+                            // List items
+                            const liText = Array.from(node.childNodes)
+                                .map(child => processNode(child))
+                                .join('').trim();
+                            if (liText) {
+                                result += '• ' + liText + '\n';
+                            }
+                            break;
+                            
+                        case 'blockquote':
+                            // Blockquotes get indentation
+                            const quoteText = Array.from(node.childNodes)
+                                .map(child => processNode(child))
+                                .join('').trim();
+                            if (quoteText) {
+                                result += '\n    ' + quoteText.replace(/\n/g, '\n    ') + '\n\n';
+                            }
+                            break;
+                            
+                        case 'em':
+                        case 'i':
+                            // Italic text
+                            result += '_' + node.textContent.trim() + '_';
+                            break;
+                            
+                        case 'strong':
+                        case 'b':
+                            // Bold text
+                            result += '**' + node.textContent.trim() + '**';
+                            break;
+                            
+                        case 'script':
+                        case 'style':
+                            // Skip scripts and styles entirely
+                            break;
+                            
+                        default:
+                            // For other elements, just process children
+                            for (const child of node.childNodes) {
+                                result += processNode(child);
+                            }
+                            break;
+                    }
+                }
+                
+                return result;
+            }
+            
+            let result = processNode(tempDiv);
+            
+            // Clean up the result
+            result = result
+                .replace(/\n{3,}/g, '\n\n') // No more than 2 consecutive newlines
+                .replace(/[ \t]+/g, ' ') // Collapse multiple spaces
+                .replace(/\n /g, '\n') // Remove spaces at start of lines
+                .replace(/ \n/g, '\n') // Remove spaces at end of lines
+                .trim();
+            
+            return result;
         }
 
         async function processTXT() {
@@ -740,11 +950,68 @@
             
             updateProgress(30, 'Analyzing text structure...');
             
-            const paragraphs = text.split(/\n\s*\n/).filter(function(p) { 
-                return p.trim().length > 0; 
+            // Enhanced text processing to preserve structure
+            let processedText = text
+                // Normalize line endings
+                .replace(/\r\n/g, '\n')
+                .replace(/\r/g, '\n')
+                
+                // Detect chapter headings (common patterns)
+                .replace(/^(Chapter \d+.*|CHAPTER \d+.*|Part \d+.*|PART \d+.*|\d+\. .*)$/gm, '\n## $1\n')
+                
+                // Preserve paragraph breaks (double newlines)
+                .replace(/\n\s*\n/g, '\n\n')
+                
+                // Clean up excessive whitespace
+                .replace(/[ \t]+/g, ' ')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            
+            updateProgress(50, 'Creating sections...');
+            
+            // Split into sections based on double line breaks
+            const sections = processedText.split(/\n\n+/).filter(function(section) { 
+                return section.trim().length > 0; 
             });
             
-            updateProgress(50, 'Creating email chunks...');
+            // Group sections into logical paragraphs
+            const paragraphs = [];
+            let currentParagraph = '';
+            
+            for (let i = 0; i < sections.length; i++) {
+                const section = sections[i].trim();
+                
+                // Check if this looks like a chapter heading
+                if (section.match(/^##\s/)) {
+                    // Save previous paragraph if it exists
+                    if (currentParagraph.trim()) {
+                        paragraphs.push(currentParagraph.trim());
+                        currentParagraph = '';
+                    }
+                    // Start new paragraph with heading
+                    currentParagraph = section;
+                } else {
+                    // Add to current paragraph
+                    if (currentParagraph) {
+                        currentParagraph += '\n\n' + section;
+                    } else {
+                        currentParagraph = section;
+                    }
+                    
+                    // If paragraph is getting long, consider breaking it
+                    if (currentParagraph.length > 2000) {
+                        paragraphs.push(currentParagraph.trim());
+                        currentParagraph = '';
+                    }
+                }
+            }
+            
+            // Add final paragraph
+            if (currentParagraph.trim()) {
+                paragraphs.push(currentParagraph.trim());
+            }
+            
+            updateProgress(70, 'Creating email chunks...');
             
             const chunkCount = parseInt(document.getElementById('chunkCount').value);
             const paragraphsPerChunk = Math.ceil(paragraphs.length / chunkCount);
@@ -756,16 +1023,27 @@
                 const chunkParagraphs = paragraphs.slice(startParagraph, endParagraph);
                 
                 if (chunkParagraphs.length > 0) {
-                    const content = chunkParagraphs.join('\n\n');
+                    const content = chunkParagraphs.join('\n\n---\n\n');
+                    
+                    // Try to extract a title from the first paragraph
+                    let title = 'Part ' + (i + 1);
+                    const firstPara = chunkParagraphs[0];
+                    const firstLine = firstPara.split('\n')[0];
+                    
+                    // If first line looks like a heading, use it as title
+                    if (firstLine.match(/^##\s(.+)/) || firstLine.length < 100) {
+                        title = firstLine.replace(/^##\s/, '').trim();
+                    }
+                    
                     processedChunks.push({
-                        title: 'Part ' + (i + 1),
+                        title: title,
                         content: content,
                         part: i + 1,
                         total: chunkCount
                     });
                 }
                 
-                updateProgress(50 + (i / chunkCount) * 30, 'Creating chunk ' + (i + 1) + ' of ' + chunkCount);
+                updateProgress(70 + (i / chunkCount) * 20, 'Creating chunk ' + (i + 1) + ' of ' + chunkCount);
             }
         }
 
@@ -906,9 +1184,44 @@
                 '  // Simple stop URL - just pass the email, we will verify it in doGet\n' +
                 '  const stopUrl = WEB_APP_URL + "?stop=" + encodeURIComponent(recipientEmail);\n' +
                 '  \n' +
-                '  const htmlBody = "<!DOCTYPE html><html><head><style>body{font-family:Georgia,serif;line-height:1.6;max-width:600px;margin:0 auto;padding:20px}.header{background:#4f46e5;color:white;padding:20px;border-radius:10px;margin-bottom:20px;text-align:center}.progress{background:#f3f4f6;padding:15px;border-radius:8px;margin-bottom:20px}.content{font-size:16px;line-height:1.8}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:14px}.stop-link{background:#ef4444;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;font-size:12px}.stop-section{text-align:center;margin-top:20px;padding:15px;background:#fef2f2;border-radius:8px}.incognito-note{background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;margin:10px 0;font-size:11px;color:#9a3412}</style></head><body><div class=\\"header\\"><h1>" + bookTitle + "</h1><p>Part " + partNumber + " of " + totalParts + "</p></div><div class=\\"progress\\"><strong>Reading Progress:</strong> " + Math.round((partNumber / totalParts) * 100) + "% complete<br><strong>Section:</strong> " + emailData.title + "<br><strong>Estimated completion:</strong> " + (totalParts - partNumber) + " emails remaining</div><div class=\\"content\\">" + emailData.content.replace(/\\n\\n/g, "</p><p>").replace(/^/, "<p>").replace(/$/, "</p>") + "</div><div class=\\"footer\\"><p>This is part " + partNumber + " of " + totalParts + " of your personalized reading series.</p><p>Generated by Book Email Scheduler</p><div class=\\"stop-section\\"><p><strong>Want to stop receiving these emails?</strong></p><a href=\\"" + stopUrl + "\\" class=\\"stop-link\\">Stop Email Series</a><div class=\\"incognito-note\\"><strong>Multiple Google Accounts?</strong><br>If the stop link does not work, copy this URL and paste it into an <strong>incognito/private browser window</strong>:<br><code style=\\"background:#f3f4f6;padding:2px 4px;border-radius:3px;font-size:10px;word-break:break-all\\">" + stopUrl + "</code></div><p style=\\"font-size:11px;margin-top:10px\\">This will immediately cancel all remaining emails in this series.</p></div></div></body></html>";\n' +
+                '  // Enhanced content formatting for better readability\n' +
+                '  const formattedContent = formatEmailContent(emailData.content);\n' +
+                '  \n' +
+                '  const htmlBody = "<!DOCTYPE html><html><head><style>body{font-family:Georgia,serif;line-height:1.6;max-width:600px;margin:0 auto;padding:20px}.header{background:#4f46e5;color:white;padding:20px;border-radius:10px;margin-bottom:20px;text-align:center}.progress{background:#f3f4f6;padding:15px;border-radius:8px;margin-bottom:20px}.content{font-size:16px;line-height:1.8;margin-bottom:20px}.content h1,.content h2,.content h3{color:#2d3748;margin:1.5em 0 0.75em 0;line-height:1.3}.content h2{font-size:1.3em;border-bottom:2px solid #e2e8f0;padding-bottom:0.3em}.content p{margin:0 0 1em 0}.content blockquote{border-left:4px solid #cbd5e0;margin:1em 0;padding:0.5em 0 0.5em 1em;color:#4a5568;font-style:italic}.content ul{margin:1em 0;padding-left:2em}.content li{margin:0.25em 0}.separator{border-top:2px solid #e2e8f0;margin:2em 0;padding-top:1em}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:14px}.stop-link{background:#ef4444;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;font-size:12px}.stop-section{text-align:center;margin-top:20px;padding:15px;background:#fef2f2;border-radius:8px}.incognito-note{background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;margin:10px 0;font-size:11px;color:#9a3412}</style></head><body><div class=\\"header\\"><h1>" + bookTitle + "</h1><p>Part " + partNumber + " of " + totalParts + "</p></div><div class=\\"progress\\"><strong>Reading Progress:</strong> " + Math.round((partNumber / totalParts) * 100) + "% complete<br><strong>Section:</strong> " + emailData.title + "<br><strong>Estimated completion:</strong> " + (totalParts - partNumber) + " emails remaining</div><div class=\\"content\\">" + formattedContent + "</div><div class=\\"footer\\"><p>This is part " + partNumber + " of " + totalParts + " of your personalized reading series.</p><p>Generated by Book Email Scheduler</p><div class=\\"stop-section\\"><p><strong>Want to stop receiving these emails?</strong></p><a href=\\"" + stopUrl + "\\" class=\\"stop-link\\">Stop Email Series</a><div class=\\"incognito-note\\"><strong>Multiple Google Accounts?</strong><br>If the stop link does not work, copy this URL and paste it into an <strong>incognito/private browser window</strong>:<br><code style=\\"background:#f3f4f6;padding:2px 4px;border-radius:3px;font-size:10px;word-break:break-all\\">" + stopUrl + "</code></div><p style=\\"font-size:11px;margin-top:10px\\">This will immediately cancel all remaining emails in this series.</p></div></div></body></html>";\n' +
                 '  \n' +
                 '  GmailApp.sendEmail(recipientEmail, subject, "", { htmlBody: htmlBody, name: "Book Email Scheduler" });\n' +
+                '}\n\n' +
+                'function formatEmailContent(content) {\n' +
+                '  return content\n' +
+                '    // Convert markdown-style headers to HTML\n' +
+                '    .replace(/^## (.+)$/gm, "<h2>$1</h2>")\n' +
+                '    .replace(/^# (.+)$/gm, "<h1>$1</h1>")\n' +
+                '    .replace(/^### (.+)$/gm, "<h3>$1</h3>")\n' +
+                '    \n' +
+                '    // Convert section separators\n' +
+                '    .replace(/^---$/gm, "<div class=\\"separator\\"></div>")\n' +
+                '    \n' +
+                '    // Convert bold and italic text\n' +
+                '    .replace(/\\*\\*(.+?)\\*\\*/g, "<strong>$1</strong>")\n' +
+                '    .replace(/_(.+?)_/g, "<em>$1</em>")\n' +
+                '    \n' +
+                '    // Convert bullet points\n' +
+                '    .replace(/^• (.+)$/gm, "<li>$1</li>")\n' +
+                '    \n' +
+                '    // Wrap consecutive list items in ul tags\n' +
+                '    .replace(/((<li>.*<\\/li>\\s*)+)/g, "<ul>$1</ul>")\n' +
+                '    \n' +
+                '    // Convert double line breaks to paragraphs\n' +
+                '    .split("\\n\\n")\n' +
+                '    .map(function(para) { \n' +
+                '      para = para.trim();\n' +
+                '      if (!para) return "";\n' +
+                '      // Skip if already wrapped in HTML tags\n' +
+                '      if (para.match(/^<(h[1-6]|div|ul)/)) return para;\n' +
+                '      return "<p>" + para.replace(/\\n/g, "<br>") + "</p>";\n' +
+                '    })\n' +
+                '    .filter(function(para) { return para; })\n' +
+                '    .join("\\n");\n' +
                 '}\n\n' +
                 'function sendNextEmail() {\n' +
                 '  const props = PropertiesService.getScriptProperties();\n' +
