@@ -750,6 +750,7 @@
             updateProgress(50, 'Processing chapters...');
             
             const chapters = [];
+            let actualChapterCount = 0; // Track only numbered chapters
             
             for (let i = 0; i < orderedFiles.length; i++) {
                 const filename = orderedFiles[i];
@@ -776,29 +777,20 @@
                 
                 // Only include if substantial content
                 if (structuredText.trim().length > 200) {
-                    // Try to extract chapter title from content
-                    const lines = structuredText.split('\n').filter(line => line.trim());
-                    let chapterTitle = null;
+                    // Extract chapter title and determine type
+                    const titleInfo = extractChapterTitle(structuredText, bookTitle);
                     
-                    // Look for chapter heading in first few lines
-                    for (let j = 0; j < Math.min(5, lines.length); j++) {
-                        const line = lines[j].trim();
-                        if (line.length < 100 && (
-                            line.toLowerCase().includes('chapter') ||
-                            line.toLowerCase().includes('part ') ||
-                            line.match(/^[IVX]+\.?\s/) || // Roman numerals
-                            line.match(/^\d+\.?\s/) || // Numbers
-                            line.length < 50 // Short lines likely to be titles
-                        )) {
-                            chapterTitle = line;
-                            break;
-                        }
+                    // Only increment chapter count for actual chapters
+                    if (titleInfo.isNumberedChapter) {
+                        actualChapterCount++;
                     }
                     
                     chapters.push({
-                        title: chapterTitle || `Chapter ${chapters.length + 1}`,
-                        content: structuredText,
-                        filename: filename
+                        title: titleInfo.cleanTitle,
+                        content: titleInfo.contentWithoutTitle,
+                        filename: filename,
+                        isNumberedChapter: titleInfo.isNumberedChapter,
+                        chapterNumber: titleInfo.isNumberedChapter ? actualChapterCount : null
                     });
                 }
                 
@@ -817,18 +809,40 @@
                 const chunkChapters = chapters.slice(startChapter, endChapter);
                 
                 if (chunkChapters.length > 0) {
-                    // Format content with proper chapter separation
+                    // Format content without redundant titles
                     const formattedContent = chunkChapters.map(chapter => {
-                        if (chapter.title) {
+                        // Don't add header if title is already in the content or if it's generic
+                        const needsHeader = chapter.title && 
+                            !chapter.title.startsWith('Section') && 
+                            !chapter.content.toLowerCase().includes(chapter.title.toLowerCase()) &&
+                            chapter.title !== 'Untitled';
+                            
+                        if (needsHeader) {
                             return `## ${chapter.title}\n\n${chapter.content}`;
                         }
                         return chapter.content;
                     }).join('\n\n---\n\n');
                     
+                    // Create better chunk title
+                    let chunkTitle;
+                    if (chunkChapters.length === 1 && chunkChapters[0].title !== 'Untitled') {
+                        chunkTitle = chunkChapters[0].title;
+                    } else {
+                        // Create title based on chapter numbers if available
+                        const numberedChapters = chunkChapters.filter(ch => ch.chapterNumber);
+                        if (numberedChapters.length > 0) {
+                            const firstNum = numberedChapters[0].chapterNumber;
+                            const lastNum = numberedChapters[numberedChapters.length - 1].chapterNumber;
+                            chunkTitle = firstNum === lastNum ? 
+                                `Chapter ${firstNum}` : 
+                                `Chapters ${firstNum}-${lastNum}`;
+                        } else {
+                            chunkTitle = `Section ${i + 1}`;
+                        }
+                    }
+                    
                     processedChunks.push({
-                        title: chunkChapters.length === 1 ? 
-                            chunkChapters[0].title : 
-                            `Chapters ${startChapter + 1}-${endChapter}`,
+                        title: chunkTitle,
                         content: formattedContent,
                         part: i + 1,
                         total: chunkCount
@@ -943,6 +957,79 @@
             return result;
         }
 
+        function extractChapterTitle(text, bookTitle) {
+            const lines = text.split('\n').filter(line => line.trim());
+            let chapterTitle = null;
+            let titleLineIndex = -1;
+            let isNumberedChapter = false;
+            
+            // Look for chapter heading in first few lines
+            for (let i = 0; i < Math.min(5, lines.length); i++) {
+                const line = lines[i].trim();
+                
+                // Skip if line is too long to be a title
+                if (line.length > 100) continue;
+                
+                // Check for various chapter patterns
+                const isChapterLine = 
+                    line.match(/^chapter\s+\d+/i) ||
+                    line.match(/^chapter\s+[ivxlcdm]+/i) ||
+                    line.match(/^\d+\.?\s+/i) ||
+                    line.match(/^[ivxlcdm]+\.?\s+/i);
+                
+                const isPrefaceOrIntro = 
+                    line.match(/^(preface|introduction|prologue|foreword|acknowledgments|epilogue)/i);
+                
+                const isPartOrSection = 
+                    line.match(/^(part|section|book)\s+/i);
+                
+                if (isChapterLine || isPrefaceOrIntro || isPartOrSection || 
+                    (line.length < 50 && line.length > 0)) {
+                    
+                    chapterTitle = line;
+                    titleLineIndex = i;
+                    
+                    // Determine if this is a numbered chapter
+                    isNumberedChapter = isChapterLine && !isPrefaceOrIntro;
+                    break;
+                }
+            }
+            
+            // Clean up the title
+            if (chapterTitle) {
+                // Remove book title if it appears in the chapter title
+                if (bookTitle && chapterTitle.toLowerCase().includes(bookTitle.toLowerCase())) {
+                    chapterTitle = chapterTitle.replace(new RegExp(bookTitle, 'gi'), '').trim();
+                    chapterTitle = chapterTitle.replace(/^[:\-–—]\s*/, '').trim(); // Remove leading punctuation
+                }
+                
+                // Remove common prefixes that might be redundant
+                chapterTitle = chapterTitle.replace(/^(chapter|ch\.)\s*/i, 'Chapter ');
+                chapterTitle = chapterTitle.replace(/^(part|pt\.)\s*/i, 'Part ');
+                
+                // If title is empty or too generic after cleaning, make it generic
+                if (!chapterTitle || chapterTitle.length < 2) {
+                    chapterTitle = 'Untitled';
+                }
+            } else {
+                chapterTitle = 'Untitled';
+            }
+            
+            // Remove title line from content to avoid duplication
+            let contentWithoutTitle = text;
+            if (titleLineIndex >= 0) {
+                const linesArray = text.split('\n');
+                linesArray.splice(titleLineIndex, 1);
+                contentWithoutTitle = linesArray.join('\n').trim();
+            }
+            
+            return {
+                cleanTitle: chapterTitle,
+                contentWithoutTitle: contentWithoutTitle,
+                isNumberedChapter: isNumberedChapter
+            };
+        }
+
         async function processTXT() {
             updateProgress(10, 'Reading text file...');
             
@@ -956,8 +1043,13 @@
                 .replace(/\r\n/g, '\n')
                 .replace(/\r/g, '\n')
                 
-                // Detect chapter headings (common patterns)
-                .replace(/^(Chapter \d+.*|CHAPTER \d+.*|Part \d+.*|PART \d+.*|\d+\. .*)$/gm, '\n## $1\n')
+                // Detect various heading patterns but be smarter about numbering
+                .replace(/^(Chapter \d+.*|CHAPTER \d+.*)$/gm, '\n## $1\n')
+                .replace(/^(Part \d+.*|PART \d+.*)$/gm, '\n## $1\n')
+                .replace(/^(\d+\. .{5,50})$/gm, '\n## $1\n') // Numbered sections (not too short or long)
+                
+                // Handle common non-numbered sections
+                .replace(/^(Preface|PREFACE|Introduction|INTRODUCTION|Prologue|PROLOGUE|Foreword|FOREWORD|Acknowledgments|ACKNOWLEDGMENTS|Epilogue|EPILOGUE)$/gm, '\n## $1\n')
                 
                 // Preserve paragraph breaks (double newlines)
                 .replace(/\n\s*\n/g, '\n\n')
@@ -974,22 +1066,41 @@
                 return section.trim().length > 0; 
             });
             
-            // Group sections into logical paragraphs
+            // Group sections into logical paragraphs with smart chapter detection
             const paragraphs = [];
             let currentParagraph = '';
+            let chapterCount = 0;
             
             for (let i = 0; i < sections.length; i++) {
                 const section = sections[i].trim();
                 
                 // Check if this looks like a chapter heading
-                if (section.match(/^##\s/)) {
+                const isChapterHeading = section.match(/^##\s/);
+                const isNumberedChapter = section.match(/^##\s+(chapter|ch\.)\s+\d+/i);
+                
+                if (isChapterHeading) {
                     // Save previous paragraph if it exists
                     if (currentParagraph.trim()) {
                         paragraphs.push(currentParagraph.trim());
                         currentParagraph = '';
                     }
-                    // Start new paragraph with heading
-                    currentParagraph = section;
+                    
+                    // Clean up chapter title
+                    let cleanTitle = section.replace(/^##\s+/, '');
+                    
+                    // Remove book title if present
+                    if (bookTitle && cleanTitle.toLowerCase().includes(bookTitle.toLowerCase())) {
+                        cleanTitle = cleanTitle.replace(new RegExp(bookTitle, 'gi'), '').trim();
+                        cleanTitle = cleanTitle.replace(/^[:\-–—]\s*/, '').trim();
+                    }
+                    
+                    // Count only numbered chapters
+                    if (isNumberedChapter) {
+                        chapterCount++;
+                    }
+                    
+                    // Start new paragraph with cleaned heading
+                    currentParagraph = '## ' + cleanTitle;
                 } else {
                     // Add to current paragraph
                     if (currentParagraph) {
@@ -1025,14 +1136,21 @@
                 if (chunkParagraphs.length > 0) {
                     const content = chunkParagraphs.join('\n\n---\n\n');
                     
-                    // Try to extract a title from the first paragraph
+                    // Extract a meaningful title from the first paragraph
                     let title = 'Part ' + (i + 1);
                     const firstPara = chunkParagraphs[0];
                     const firstLine = firstPara.split('\n')[0];
                     
-                    // If first line looks like a heading, use it as title
-                    if (firstLine.match(/^##\s(.+)/) || firstLine.length < 100) {
-                        title = firstLine.replace(/^##\s/, '').trim();
+                    // If first line looks like a chapter heading, use it as title
+                    if (firstLine.match(/^##\s(.+)/)) {
+                        const extractedTitle = firstLine.replace(/^##\s/, '').trim();
+                        // Only use if it's not too generic
+                        if (!extractedTitle.match(/^(part|section)\s+\d+$/i)) {
+                            title = extractedTitle;
+                        }
+                    } else if (firstLine.length < 80 && firstLine.length > 5) {
+                        // Short lines that aren't headers might still be good titles
+                        title = firstLine.trim();
                     }
                     
                     processedChunks.push({
